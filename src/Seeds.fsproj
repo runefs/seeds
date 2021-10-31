@@ -4,7 +4,8 @@
     <TargetFramework>net5.0</TargetFramework>
     <GenerateDocumentationFile>true</GenerateDocumentationFile>
     <WarnOn>3390;$(WarnOn)</WarnOn>
-    <OutputType>Exe</OutputType>
+    <OutputType>Library</OutputType>
+    <DebugType>portable</DebugType>
   </PropertyGroup>
   <ItemGroup>
     <Compile Include="Helpers.fs" />
@@ -13,6 +14,5 @@
     <Compile Include="DciTest.fs" />
     <Compile Include="Program.fs" />
   </ItemGroup>
-  
-  <Import Project="..\.paket\Paket.Restore.targets" />
+  <Import Project="..\..\.paket\Paket.Restore.targets" />
 </Project>
