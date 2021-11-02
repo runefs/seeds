@@ -375,7 +375,7 @@ let rec methodToExpressionTree deepTransform (methodInfo : System.Reflection.Met
         parameters
         |> List.map(fun (_,argType,name) ->
             //this will always be a parameter
-            if deepTransform && name <> "this" then
+            if deepTransform then
                 name, getOrCreateVariable argType <| "__param__" + name :> Expression
             else
                 name,Expression.Parameter(argType,name) :> Expression
