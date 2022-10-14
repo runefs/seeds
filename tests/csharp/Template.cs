@@ -33,4 +33,8 @@ public class Template
         }
         return "false";
    }
+
+   public string ReverseSimpleIf() {
+         return SimpleIf(1);
+   }
 }
