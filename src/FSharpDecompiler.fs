@@ -6,14 +6,14 @@ open System.Reflection.Emit
 open DecompileContext
 
 let rec methodToExpressionTree (ctx : DecompileContext) =
-    let rec inner (stack : Stack) instructions : BlockExpression = 
+    let rec inner (stack : Stack) instructions : CompiledExpression = 
         
         let readCondition condition = 
             //printfn "if true: %A" ifTrue   
             let lhs, rhs, stack = 
                 match condition with
                 False | True -> 
-                    let (rhs : BlockExpression * int),stack = stack.Pop()
+                    let (rhs : CompiledExpression * int),stack = stack.Pop()
                     let lhs = 
                         if (rhs |> fst).Expression.Type = typeof<bool> then None
                         else Expression.Constant(1) :> Expression |> Some
@@ -50,7 +50,7 @@ let rec methodToExpressionTree (ctx : DecompileContext) =
                         Expression.Goto breakLabel) :> Expression)
 
             let body = 
-                match inner Stack.Empty block with
+                match inner Stack<_>.Empty block with
                 Exprs(exprs) -> exprs
                 | Expr _ as e -> [e]
                 | ex -> failwithf "Not implemented for while body %A" ex
@@ -88,8 +88,8 @@ let rec methodToExpressionTree (ctx : DecompileContext) =
                     | i -> i
                 )
 
-           let ifTrueBlock = ifTrue |> trim |> inner Stack.Empty
-           let ifFalseBlock = ifFalse |> trim |> inner Stack.Empty
+           let ifTrueBlock = ifTrue |> trim |> inner Stack<_>.Empty
+           let ifFalseBlock = ifFalse |> trim |> inner Stack<_>.Empty
            
            let gotoEnd = Expression.Goto(ifEndLabel)
            let ifResultType = ifFalseBlock.Type
@@ -163,7 +163,7 @@ let rec methodToExpressionTree (ctx : DecompileContext) =
                     parameters.Length + 1
             let args,stack = 
                 stack.Take parameterCount
-            let convertArguments (arguments : (BlockExpression * int) list) = 
+            let convertArguments (arguments : (CompiledExpression * int) list) = 
                 arguments
                 |> List.mapi(fun i (a,_) -> 
                     let exprType = a.Type
@@ -353,7 +353,7 @@ let rec methodToExpressionTree (ctx : DecompileContext) =
             inner (loadLocal builder.LocalIndex offset) tail
         | (Statement(Pop),_)::tail ->
             let (exp,offset),stack = stack.Pop()
-            let stack = (BlockExpression.Pop(exp),offset) |> stack.Push
+            let stack = (CompiledExpression.Pop(exp),offset) |> stack.Push
               
             inner stack tail 
         | [] | [(Statement(Return),_)] -> 
@@ -362,7 +362,6 @@ let rec methodToExpressionTree (ctx : DecompileContext) =
                 |> List.filter(fun (expr,_) -> 
                     expr <> PartialExpr(Statement(Nop))
                 )
-                |> List.rev 
                 |> List.map fst
             match expressions with
             [e] when e = Empty -> Empty
@@ -394,7 +393,7 @@ let rec methodToExpressionTree (ctx : DecompileContext) =
         | (h,offset)::tail ->  
             inner ((PartialExpr h,offset) |> stack.Push) tail
     let expressionBlock = 
-        match inner Stack.Empty ctx.Instructions with
+        match inner Stack<_>.Empty ctx.Instructions with
         Exprs(exprs) -> 
             Exprs(exprs)
         | Expr _ as e -> Exprs([e])

@@ -5,12 +5,12 @@ open Mono.Reflection
 open System
 open DecompileContext
 
-let printAst (expr : DecompileContext.BlockExpression) = 
+let printAst (expr : DecompileContext.CompiledExpression) = 
     let rec innerPrint ident expr = 
         let identation = System.String(' ',ident)
         match expr with
         DecompileContext.Expr(_,e) -> printfn "%s%A" identation e
-        | DecompileContext.BlockExpression.Pop _ as p -> printfn "%s%A" identation p.Expression
+        | DecompileContext.CompiledExpression.Pop _ as p -> printfn "%s%A" identation p.Expression
         | DecompileContext.Exprs(exprs) -> 
             let ident = ident + 4
             printfn "Expr ("
@@ -49,6 +49,7 @@ let main _ =
                 printAst methodBodyAst
              let ``delegate`` = 
                  ExpressionTree.compile methodBodyAst parameters variables
+             let self = Activator.CreateInstance(t)
              let arguments = 
                  m.GetParameters()
                  |> Array.map(fun p -> 
@@ -56,17 +57,16 @@ let main _ =
                          Activator.CreateInstance(p.ParameterType) |> box 
                      else
                         null
-                 ) |> Array.append [|Activator.CreateInstance(t) |]
-             let res = ``delegate``.DynamicInvoke(arguments) 
-             match res with
-             null when m.ReturnType = typeof<System.Void> || m.ReturnType = typeof<unit> ->
-                 printfn "Method executed successfully"
-             | null -> 
-                 printfn "Expected a value but got null"
-             | res -> 
+                 ) 
+             let res = ``delegate``.DynamicInvoke(arguments |> Array.append [|self|]) 
+             let actualResult = m.Invoke(self,arguments)
+             if res = actualResult then
                  res
                  |> unbox
                  |> printfn "Method executed successfully. Result: %A"
+             else 
+                 failwith $"Unexpected result got %A{res} but expected %A{actualResult}"
+             
         )
     )
     0

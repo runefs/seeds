@@ -9,13 +9,14 @@ let methodToExpressionTree lang deepTransform (methodInfo : System.Reflection.Me
     DecompileContext(deepTransform,methodInfo)
     |> (match lang with
         Language.CSharp -> CSharpDecompiler.methodToExpressionTree
-        | Language.FSharp -> FSharpDecompiler.methodToExpressionTree)
+        | Language.FSharp -> failwith "Not implemented yet" //FSharpDecompiler.methodToExpressionTree
+    )
 
 let compile expr (parameters : ParameterExpression seq) variables = 
     let exprs = 
         match expr with
         Expr(_,e) -> [e]
-        | BlockExpression.Pop _ as p -> [p.Expression]
+        | CompiledExpression.Pop _ as p -> [p.Expression]
         | Exprs(exprs) -> 
             let exprs = 
                 match exprs |> List.map(fun e -> e.Expression) |> List.rev with

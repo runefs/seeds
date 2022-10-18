@@ -1,0 +1,17 @@
+{
+	"version": "2.0.0",
+	"tasks": [
+		{
+			"type": "msbuild",
+			"problemMatcher": [
+				"$msCompile"
+			],
+			"options" : {
+				"cwd" : "${workspaceFolder}/../tests/"
+			},
+			"group": "build",
+			"label": "Build",
+			"detail": "Build the test.fsproj project using dotnet build"
+		}
+	]
+}

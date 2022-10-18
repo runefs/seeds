@@ -10,8 +10,8 @@
   <ItemGroup>
     <!-- <Compile Include="Helpers.fs" /> -->
     <Compile Include="DecompileContext.fs" />
-    <Compile Include="FSharpDEcompiler.fs" />
-    <Compile Include="CSharpDEcompiler.fs" />
+    <!--<Compile Include="FSharpDecompiler.fs" />-->
+    <Compile Include="CSharpDecompiler.fs" />
     <!-- <Compile Include="Template.fs" /> -->
     <Compile Include="ExpressionTree.fs" />
     <!-- <Compile Include="DciTest.fs" />

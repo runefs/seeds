@@ -3,12 +3,12 @@ module Program
 open System.Reflection
 open Mono.Reflection
 open System
-let printAst (expr : ExpressionTree.BlockExpression) = 
+let printAst (expr : ExpressionTree.CompiledExpression) = 
     let rec innerPrint ident expr = 
         let identation = System.String(' ',ident)
         match expr with
         ExpressionTree.Expr(_,e) -> printfn "%s%A" identation e
-        | ExpressionTree.BlockExpression.Pop _ as p -> printfn "%s%A" identation p.Expression
+        | ExpressionTree.CompiledExpression.Pop _ as p -> printfn "%s%A" identation p.Expression
         | ExpressionTree.Exprs(exprs) -> 
             let ident = ident + 4
             printfn "Expr ("
