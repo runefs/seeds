@@ -21,7 +21,7 @@ let compile expr (parameters : ParameterExpression seq) variables =
             let exprs = 
                 match exprs |> List.map(fun e -> e.Expression) |> List.rev with
                 result::body -> 
-                    result::(Expression.Label(DecompileContext.ReturnLabel) :> Expression)::body
+                    result::(*(Expression.Label(DecompileContext.ReturnLabel) :> Expression)::*)body
                 | [] -> []
             exprs |> List.rev
         | e -> failwithf "Don't know how to finish off with %A" e
@@ -31,4 +31,4 @@ let compile expr (parameters : ParameterExpression seq) variables =
 #if DEBUG    
     printfn "%s" (Mono.Linq.Expressions.CSharp.ToCSharpCode(lambda))
 #endif
-    lambda.Compile()
+    lambda.Compile() 

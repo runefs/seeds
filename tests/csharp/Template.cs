@@ -1,6 +1,6 @@
 ﻿namespace csharp;
 public class Template
-{
+{/*
    public int NoArgsWithStraightReturn() {
         return 1;
    }
@@ -25,7 +25,7 @@ public class Template
 
    public int CallingOtherWithArgs(int a,int b) {
         return Add(a + 1,b + 1);
-   } 
+   } */
 
    public string SimpleIf(int a) {
         if(a == 1){
@@ -34,7 +34,7 @@ public class Template
         return "false";
    }
 
-    public string SimpleIfElse(int a) {
+    /*public string SimpleIfElse(int a) {
         var res = "";
         if(a == 1){
           res = "true";
@@ -80,4 +80,15 @@ public class Template
      }
      return j;
    }
+
+   public int While(){
+     var j = 0;
+     var i = 0;
+     while(i<10){
+          i++;
+          j = i;
+     }
+     return j;
+   }
+*/
 }

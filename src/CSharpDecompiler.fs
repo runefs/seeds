@@ -179,7 +179,7 @@ let rec methodToExpressionTree (ctx : DecompileContext) =
                     Expression.IfThenElse(condition.Expression,trueBlock.Expression,elseBlock.Expression) :> Expression 
             let ifExpression = 
                 Expr(typeof<System.Void>,exp), blockStart 
-            let stack = ifExpression |> Stack.Empty.Push
+            let stack = ifExpression |> stack.Push
             inner stack remaining
         | (Expression(LoadField(f)),_)::tail ->
             let (instance,instanceOffset),stack = stack.Pop()
@@ -305,36 +305,20 @@ let rec methodToExpressionTree (ctx : DecompileContext) =
             | [e] -> (e.Type,e.Expression) |> Expr
             | [] -> Empty
             | exprs -> Exprs(exprs)
-        | [(StackInstruction.Expression(Return expr),_)] -> 
-            let expressions = 
-                stack.ToList()
-                |> List.filter(fun (expr,_) -> 
-                    expr <> PartialExpr(Statement(Nop))
-                )
-                |> List.map fst
-            match expressions with
-            [e] when e = Empty -> Empty
-            | [e] -> (e.Type,e.Expression) |> Expr
-            | [] -> Empty
-            | exprs -> Exprs(exprs)
         | (StackInstruction.Expression(Return expr),offset)::tail ->
             let returnType = ctx.ReturnType
-            let result = ctx.Result
+            let result = (expr |> compileExpression offset)
             let stack = 
-                match stack.TryPop() with
-                None -> stack
-                | Some((e,_),stack) -> 
-                    if returnType <> typeof<System.Void> && returnType <> typeof<unit> then
-                        stack.Push(Expr(result.Type,Expression.Assign(result,e.Expression)), offset)
-                    else
-                        stack
-            let stack = 
-                (Expr(returnType,Expression.Return(DecompileContext.ReturnLabel)),offset) |> stack.Push
-            let stack = 
-                if returnType <> typeof<System.Void> && returnType <> typeof<unit> then
-                    (Expr(returnType,result),offset) |> stack.Push
-                else
-                    stack
+                match tail with
+                [] ->
+                    //there's an implicit return at the last expression
+                    //Adding an explicit return will cause an infinite loop 
+                    //because the return instruction will come after the return label 
+                    (result,offset) |> stack.Push 
+                | _ -> 
+                    //early return
+                    (Expr(returnType,Expression.Return(DecompileContext.ReturnLabel,result.Expression,returnType))
+                     ,offset) |> stack.Push
             inner stack tail
         | (Expression(LoadArgument ident),offset)::tail ->
             let arg = ctx.GetParameterExpression ident
@@ -342,7 +326,7 @@ let rec methodToExpressionTree (ctx : DecompileContext) =
         | (h,offset)::tail ->  
             printfn $"Partial/Unmatched (%A{h}, %d{offset})"
             inner ((PartialExpr h,offset) |> stack.Push) tail
-    let expressionBlock = 
+    let expressionBlock =
         let res = 
             try 
                 inner Stack.Empty ctx.Instructions
