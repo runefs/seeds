@@ -39,50 +39,81 @@ module rec Decompiler =
         :? BlockExpression as block -> block.Expressions |> List.ofSeq
         | _ -> [e]
 
-    let forLoop decompileBlock decompileExpression (variableCollection : VariableCollection) preample condition content = 
+    let forLoop decompileBlock decompileExpression (variableCollection : VariableCollection) target offset tail = 
+        let nextOffset = tail |> List.head |> snd
+       
+        tail |> List.tryFind(function
+            (Statement(ConditionalBranch(_,target')),_) -> 
+                (target > offset && target' <= nextOffset)
+            | _ -> false
+        ) |> Option.map snd
+        |> Option.bind (fun loopEndOffset ->
+            let loopBlock = 
+                tail |> List.takeWhile (fun (_,offset) -> offset <= loopEndOffset)
+            match loopBlock |> List.last with
+            (Statement(ConditionalBranch(cmp,target')),o)->
+                
+                let preample =
+                    let pre =
+                        loopBlock 
+                        |> List.skipWhile(fun (_,offset) ->
+                            target > offset
+                        ) |> List.takeWhile (fun (_,offset) -> 
+                            offset < loopEndOffset
+                        )
+                    match pre with
+                    [] -> None
+                    | p -> Some p
+                let condition = Boolean(cmp) |> Some
+                let content = loopBlock |> List.take (loopBlock.Length - 1)
+                let expr : Expression = 
+                    let preample = 
+                        preample
+                        |> Option.map(fun preample -> decompileBlock variableCollection preample []  |> exprToList)
+                    let vc = variableCollection.Child()
+                    let condition = 
+                        match condition with
+                        None -> Expression.Constant(true) :> Expression
+                        | Some c -> decompileExpression vc c
+                    let content = decompileBlock vc content []
+                    let ``break`` = Expression.Label($"break%d{rnd.Next()}")
+                    let body = 
+                        match preample with
+                        None -> 
+                            [
+                                Expression.IfThenElse(
+                                    condition,
+                                    content,
+                                    Expression.Goto(``break``)
+                                ) :> Expression
+                            ]
+                        | Some preample ->
+                            preample@
+                            [    
+                                Expression.IfThenElse(
+                                    condition,
+                                    content,
+                                    Expression.Goto(``break``)
+                                )
+                            ] 
+                    Expression.Loop(
+                        Expression.Block(
+                            vc.AllVariables(),
+                            body
+                        ),``break``
+                    )    
+                Some(Some expr, loopBlock.Length + 1 )
+            | _ -> Some(None,0)
+        ) |> Option.orElse(Some(None,0))
+        |> Option.get
         
-        let preample = 
-            preample
-            |> Option.map(fun preample -> decompileBlock variableCollection preample []  |> exprToList)
-        let vc = variableCollection.Child()
-        let condition = 
-            match condition with
-            None -> Expression.Constant(true) :> Expression
-            | Some c -> decompileExpression vc c
-        let content = decompileBlock vc content []
-        let ``break`` = Expression.Label($"break%d{rnd.Next()}")
-        let body = 
-            match preample with
-            None -> 
-                [
-                    Expression.IfThenElse(
-                        condition,
-                        content,
-                        Expression.Goto(``break``)
-                    ) :> Expression
-                ]
-            | Some preample ->
-                preample@
-                [    
-                    Expression.IfThenElse(
-                        condition,
-                        content,
-                        Expression.Goto(``break``)
-                    )
-                ] 
-        Expression.Loop(
-            Expression.Block(
-                vc.AllVariables(),
-                body
-            ),``break``
-        )    
     let tracer (offset : int) =
         Expression.Call(
             null,
             typeof<System.Console>.GetMethod("WriteLine", [| typeof<int> |] ),
             Expression.Constant(offset)
         ) :> Expression
-    let readForeach _ _ = None
+    let readForeach _  = None,0
     let decompileBlock emitTrace (compileExpression : VariableCollection -> StackExpression -> Expression)  (compileStatement : VariableCollection -> StackStatement -> Expression) m =
         let ctx = DecompileContext(m)
         let vc = VariableCollection(m)
@@ -99,18 +130,17 @@ module rec Decompiler =
             let compileExpression = compileExpression variableCollection
             let compileStatement = compileStatement variableCollection
 
-            let expr,tail = 
+            let expr,count = 
                 match instructions with
-                [] -> None,[]
+                [] -> None,0
                 | (Expression(MethodInvocation(m,[collection])),offset)::tail when m.Name = "GetEnumerator" ->
-                    let expr,tail = 
-                        match readForeach collection tail with
-                        Some(collection,loopContent,tail) ->
-                            forEach collection loopContent :> Expression, tail
-                        | None -> 
-                            let expr = Expression.Call(collection |> compileExpression,m)
-                            expr, tail
-                    Some expr,tail
+                        match readForeach instructions with
+                        (Some(expr),count)->
+                            Some expr,count
+                        | (None,0) -> 
+                            let expr = Expression.Call(collection |> compileExpression,m) :> Expression
+                            Some expr, 1
+                        | _ -> failwith $"unexpected return from forEach at %d{offset}"
                 | (Expression(Return(Some(expr))),offset)::tail ->
                     match tail with
                     [] ->
@@ -119,7 +149,7 @@ module rec Decompiler =
                         //because the return instruction will come after the return label 
                         expr 
                         |> compileExpression
-                        |> Some,tail
+                        |> Some,1
                     | _ -> 
                         let expr = expr |> compileExpression
                         let result = Expression.Block(
@@ -127,48 +157,15 @@ module rec Decompiler =
                                 Expression.Return returnLabel
                         )
                         resultVar <- variableCollection.GetOrCreateVariable m.ReturnType resultName |> Some
-                        Some(result),tail
+                        Some(result),1
                 | (Statement(ReturnTarget),_)::tail | (Expression(Return(None)),_)::tail -> 
-                    None,tail
+                    None,1
                 | (Statement(UnconditionalBranch(target)),offset)::tail when target > offset ->
-                        let nextOffset = tail |> List.head |> snd
-                        let loopEnd = 
-                            tail |> List.tryFind(function
-                                (Statement(ConditionalBranch(_,target')),_) -> 
-                                    (target > offset && target' <= nextOffset)
-                                | _ -> false
-                            ) |> Option.map snd
-                        match loopEnd with
-                        Some loopEndOffset ->
-                            let loopBlock = tail |> List.takeWhile (fun (_,offset) -> offset <= loopEndOffset)
-                            match loopBlock |> List.last with
-                            (Statement(ConditionalBranch(cmp,target')),o)->
-                                
-                                let preamble =
-                                    let pre =
-                                        loopBlock 
-                                        |> List.skipWhile(fun (_,offset) ->
-                                            target > offset
-                                        ) |> List.takeWhile (fun (_,offset) -> 
-                                            offset < loopEndOffset
-                                        )
-                                    match pre with
-                                    [] -> None
-                                    | p -> Some p
-                                let condition = Boolean(cmp) |> Some
-                                let loopBody = loopBlock |> List.take (loopBlock.Length - 1)
-                                let expr : Expression = 
-                                     forLoop inner
-                                             compileExpression' 
-                                             variableCollection 
-                                             preamble 
-                                             condition 
-                                             loopBody
-                                Some expr, (tail |> List.skip loopBlock.Length)
-                            | _ -> failwith $"Unknown pattern %A{loopBlock} in %A{tail}"
-                        | _ -> failwith $"Expected a loop %A{tail}"
+                    tail
+                    |> forLoop inner compileExpression' variableCollection target offset
                         
-                | (Statement(ConditionalBranch(False(condition),endTrueBlock)),offset)::tail ->
+                        
+                | (Statement(ConditionalBranch(False(condition),endTrueBlock)),_)::tail ->
                     let trueBlock = tail |> List.takeWhile(fun (_,o) -> o < endTrueBlock) 
                     let remaining = tail |> List.skip trueBlock.Length
                     let condition = condition |> compileExpression
@@ -196,12 +193,12 @@ module rec Decompiler =
                         match elseBlock with
                         None ->  Expression.IfThen(condition,trueBlock)
                         | Some elseBlock -> Expression.IfThenElse(condition,trueBlock,elseBlock)
-                    Some expr,remaining
-                | (Expression(e),o)::tail -> 
-                    e |> compileExpression |> Some,tail
-                | (Statement(s),o)::tail -> 
+                    Some expr,(instructions.Length - remaining.Length)
+                | (Expression(e),o)::_ -> 
+                    e |> compileExpression |> Some,1
+                | (Statement(s),o)::_ -> 
                     let s = s |> compileStatement
-                    Some(s),tail
+                    Some(s),1
             let rtn = 
                 match resultVar with
                 None -> []
@@ -210,6 +207,7 @@ module rec Decompiler =
                         Expression.Label(returnLabel) :> Expression
                         v
                     ]
+            let tail = instructions |> List.skip count
             match expr,tail with
             None,[] -> 
                 let res = acc |> List.fold(fun rev (e : Expression) -> e::rev) rtn
@@ -225,11 +223,7 @@ module rec Decompiler =
         let optimzedInstruction = 
             ctx.Instructions
             //|> Optimizer.optimize
-#if DEBUG
-        printfn "*******************OPTIMIZED**********************************************"
-        optimzedInstruction
-        |> Seq.iter(printfn "%A")
-#endif
+
         inner vc optimzedInstruction [],vc
 
     let compileBoolean compileExpression =
