@@ -4,22 +4,7 @@ open System.Reflection
 open Mono.Reflection
 open System
 open DecompileContext
-
-let printAst (expr : DecompileContext.CompiledExpression) = 
-    let rec innerPrint ident expr = 
-        let identation = System.String(' ',ident)
-        match expr with
-        DecompileContext.Expr(_,e) -> printfn "%s%A" identation e
-        | DecompileContext.CompiledExpression.Pop _ as p -> printfn "%s%A" identation p.Expression
-        | DecompileContext.Exprs(exprs) -> 
-            let ident = ident + 4
-            printfn "Expr ("
-            exprs 
-            |> List.iter(innerPrint ident)
-            printfn ")"
-            
-        | e -> failwithf "Can't print %A" e
-    innerPrint 0 expr
+open ExpressionTreeToString
 
 [<EntryPoint>]
 let main _ = 
@@ -43,14 +28,15 @@ let main _ =
     ) |> Seq.iter(fun ((l,dt,t),ms) -> 
          ms
          |> Seq.iter(fun m ->
-             let methodBodyAst,parameters,variables =
-                ExpressionTree.methodToExpressionTree l dt m
-             if printDebugInfo then 
-                printAst methodBodyAst
-             let ``delegate`` = 
-                 ExpressionTree.compile methodBodyAst parameters variables
-             let self = Activator.CreateInstance(t)
-             let arguments = 
+            printfn $"Evaluating %s{m.Name}"
+            let ``delegate`` =
+                ExpressionTree.methodToExpressionTree true l m
+            
+            //printfn "%s" (Mono.Linq.Expressions.CSharp.ToCSharpCode(``delegate``))
+            printfn "%s" (``delegate``.ToString("Factory methods", "C#"))
+            
+            let self = Activator.CreateInstance(t)
+            let arguments = 
                  m.GetParameters()
                  |> Array.map(fun p -> 
                      if p.ParameterType.IsValueType then
@@ -58,15 +44,16 @@ let main _ =
                      else
                         null
                  ) 
-             let res = ``delegate``.DynamicInvoke(arguments |> Array.append [|self|]) 
-             let actualResult = m.Invoke(self,arguments)
-             if res = actualResult then
-                 res
-                 |> unbox
-                 |> printfn "Method executed successfully. Result: %A"
-             else 
-                 failwith $"Unexpected result got %A{res} but expected %A{actualResult}"
-             
+            printfn $"Execute %s{m.Name}?"
+            System.Console.ReadLine() |> ignore
+            let res = ``delegate``.Compile().DynamicInvoke(arguments |> Array.append [|self|]) 
+            let actualResult = m.Invoke(self,arguments)
+            if res = actualResult then
+                res
+                |> unbox
+                |> printfn "Method executed successfully. Result: %A"
+            else 
+                failwith $"Unexpected result got %A{res} but expected %A{actualResult}"
         )
     )
     0

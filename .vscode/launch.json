@@ -4,15 +4,16 @@
     // For more information, visit: https://go.microsoft.com/fwlink/?linkid=830387
     "version": "0.2.0",
     "configurations": [
+        
 
         {
             "name": "Seeds test",
             "type": "coreclr",
             "request": "launch",
             "preLaunchTask": "build",
-            "program": "${workspaceFolder}/src/bin/Debug/net5.0/Seeds.dll",
+            "program": "${workspaceFolder}/tests/bin/Debug/net6.0/csharp.dll",
             "args": [],
-            "cwd": "${workspaceFolder}/src",
+            "cwd": "${workspaceFolder}/tests",
             "stopAtEntry": false,
             "console": "internalConsole"
         }

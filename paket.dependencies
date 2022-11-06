@@ -3,6 +3,7 @@ source https://api.nuget.org/v3/index.json
 storage: none
 framework: net6.0, netstandard2.0, netstandard2.1
 
+nuget ExpressionTreeToString
 nuget Mono.Linq.Expressions
 nuget Mono.Reflection
 nuget System.Reflection.Emit

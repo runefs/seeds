@@ -1,8 +1,13 @@
 ﻿namespace csharp;
 public class Template
 {
+
+     private readonly System.Collections.Generic.IEnumerable<int> emptyInts = new int []{};
+     private readonly System.Collections.Generic.IEnumerable<int> ints = new []{0,1,2,3,4,5,6,7,8,9,10};
+     private readonly int[] intArray = new []{0,1,2,3,4,5,6,7,8,9,10};
+     private readonly int Val = 1;
    public int NoArgsWithStraightReturn() {
-        return 1;
+        return this.Val;
    }
    public int NoArgsWithReturn() {
         return 1 +1;
@@ -90,5 +95,23 @@ public class Template
      }
      return j;
    }
+
+   public int ForEachEmpty(){
+     var res = 0;
+     foreach(var i in emptyInts) {
+          res += i; 
+     }
+     return res;
+   }
+
+   
+   public int Foreach(){
+     var res = 0;
+     foreach(var i in ints) {
+          res += i; 
+     }
+     return res;
+   }
+
 
 }

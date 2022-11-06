@@ -5,154 +5,49 @@ open System.Reflection
 open System.Reflection.Emit
 open System.Linq.Expressions
 open Mono.Reflection
+open Types
 
-type Language = 
-    CSharp | FSharp
-
-type Constant =
-    Byte of byte
-    | Int16 of int16
-    | Int of int
-    | Int64 of int64
-    | String of string
-    | Single of single
-    | Float of float
-    | Null
-    with member x.Type
-            with get() = 
-                match x with
-                Byte _ -> typeof<byte>
-                | Int16 _ -> typeof<int16>
-                | Int _ -> typeof<int>
-                | Int64 _ -> typeof<int64>
-                | String _ -> typeof<string>
-                | Single _ -> typeof<single>
-                | Float _ -> typeof<float>
-                | Null -> typeof<obj>
-
-type Local = 
-    Ordinal of int
-    | Builder of LocalVariableInfo
-
-type BooleanExpression = 
-    GreaterThanEqual of lhs: StackExpression * rhs: StackExpression
-    | GreaterThan of lhs: StackExpression * rhs: StackExpression
-    | LessThanEqual of lhs: StackExpression * rhs: StackExpression
-    | LessThan of lhs: StackExpression * rhs: StackExpression
-    | NotEqual of lhs: StackExpression * rhs: StackExpression
-    | Equal of lhs: StackExpression * rhs: StackExpression
-    | True of StackExpression
-    | False of StackExpression
-
-and Stack<'a> private(_stack : 'a list) = 
-    static let _empty = Stack<'a>(List.empty)
-    member __.Pop() = 
-        _stack |> List.head, Stack(_stack |> List.tail)
-    member __.Peek() = 
-        _stack |> List.tryHead
-    member __.TryPop() = 
-        _stack |> List.tryHead
-        |> Option.map(fun head ->
-            head, Stack(_stack |> List.tail)
-        )
-    member __.Push(elem : 'a) = 
-        Stack(elem::_stack)
-    member __.Take n : 'a list * Stack<'a> = 
-        _stack |> List.take n |> List.rev, Stack(_stack |> List.skip n)
-    member __.PopTuple() : ('a * 'a) * Stack<'a> = 
-        let rhs = _stack.Head
-        let lhs = _stack.Tail.Head
-        (lhs,rhs),Stack(_stack.Tail.Tail)
-    member __.ToList() = 
-        _stack |> List.rev
-    static member Empty with get() = _empty
-
-and CompiledExpression = 
-    Expr of System.Type * Expression
-    | Exprs of CompiledExpression list
-    | Pop of CompiledExpression
-    | PartialExpr of StackInstruction
-    | Empty
-    with member x.Expression 
-           with get() =
-               match x with
-               Expr (_,e) -> e
-               | Exprs (es) -> 
-                    Expression.Block(
-                        es
-                        |> List.map(fun e -> e.Expression)
-                    ) :> Expression
-               | Pop e -> e.Expression
-               | a -> failwithf "Should be an Expression (%A)" a
-         member x.Value 
-           with get() = 
-               match x with
-               Expr (_,e) -> e
-               | Exprs(es) -> 
-                    let expressions = 
-                        es 
-                        |> List.filter(function
-                            PartialExpr _ -> false
-                            | Expr(_,e) -> e.Type <> typeof<unit> && e.Type <> typeof<System.Void>
-                            | _ -> true
-                        ) 
-                    match expressions with
-                    [] -> Expression.Constant(null) :> Expression
-                    | es -> (es |> List.last).Expression
-               | Pop e -> e.Expression
-               | a -> failwithf "Should be an Expression (%A)" a
-
-         member x.Type 
-           with get() =
-               match x with
-               Expr (t,_) -> t
-               | Exprs _ -> x.Value.Type
-               | Pop e -> e.Type
-               | a -> failwithf "Should be n Expression (%A)" a
-         member x.Append expr = 
-             match x with
-             Expr _ | Pop _  -> Exprs(x::[expr])
-             | Empty -> expr
-             | Exprs (es) -> 
-                  Exprs(es@[expr])
-             | a -> failwithf "Should be an Expression (%A)" a
+type DecompileContext(methodInfo : System.Reflection.MethodInfo) = 
+    let popInt (stack : Stack<_>) = 
+        match stack.Pop() with
+        (Expression(Constant(c)),_),stack ->
+            c.AsInt(), stack
+        | (inst,offset),stack -> failwith $"Tried to read %A{inst} at %d{offset} as an int"
         
-and StackExpression =
-    | Constant of Constant
-    | MethodInvocation of MethodInfo * StackExpression list
-    | CtorInvocation of ConstructorInfo * StackExpression list
-    | Cast of System.Type * StackExpression
-    | LoadLocal of Local
-    | LoadField of FieldInfo
-    | This
-    | LoadArgument of int
-    | Add of lhs: StackExpression * rhs: StackExpression
-    | Boolean of BooleanExpression
-    | Return of StackExpression
-
-and StackStatement = 
-    StoreField of StackExpression
-    | StoreLocal of Local * StackExpression
-    | Pop of StackInstruction
-    | Goto of LabelTarget
-    | ConditionalBranch of Condition: BooleanExpression * Offset: int
-    | UnconditionalBranch of offset: int
-    | Nop
-and StackInstruction =
-    Expression of StackExpression 
-    | Statement of StackStatement
-    member x.GetExpression() = 
-        match x with
-        Expression e -> e 
-        | Statement s -> failwith $"Expected an expression but got a statement %A{s}"
-
-and Instruction = 
-    Block of CompiledExpression
-    | StackInstruction of StackInstruction
-
-type DecompileContext(deepTransform,methodInfo : System.Reflection.MethodInfo) = 
     let readInstructions (instructions : seq<Mono.Reflection.Instruction>) = 
-       (
+        let isLoadLocal op = 
+            OpCodes.Ldloc_0 = op
+            || OpCodes.Ldloc_1 = op
+            || OpCodes.Ldloc_2 = op
+            || OpCodes.Ldloc_3 = op
+            || OpCodes.Ldloc_S = op
+            || OpCodes.Ldloca_S = op
+            || OpCodes.Ldloc = op
+
+        let isStoreLocal op = 
+            OpCodes.Stloc_0 = op
+            || OpCodes.Stloc_1 = op
+            || OpCodes.Stloc_2 = op
+            || OpCodes.Stloc_3 = op
+            || OpCodes.Stloc_S = op
+            || OpCodes.Stloc = op    
+        let returnLabel = 
+            match instructions |> Seq.rev |> Seq.toList with
+            ret::ld::_ when (ret.OpCode = OpCodes.Ret && ld.OpCode |> isLoadLocal) ->
+                let ordinal = 
+                    match ld.OpCode with
+                    op when OpCodes.Ldloc_0 = op -> 0
+                    | op when  OpCodes.Ldloc_1 = op -> 1
+                    | op when  OpCodes.Ldloc_2 = op -> 2
+                    | op when  OpCodes.Ldloc_3 = op -> 3
+                    | op when  OpCodes.Ldloc_S = op -> (ld.Operand |> unbox |> int16 |> int)
+                    | op when  OpCodes.Ldloca_S = op -> (ld.Operand |> unbox |> int16 |> int)
+                    | op when  OpCodes.Ldloc = op ->  (ld.Operand |> unbox |> int16 |> int)
+                    | op -> failwith $"Unexpected opcode %A{op}"
+
+                (ld.Offset,ordinal) |> Some
+            | _ -> None
+        (
 #if DEBUG
         instructions
         |> Seq.iter(printfn "%A")
@@ -221,41 +116,52 @@ type DecompileContext(deepTransform,methodInfo : System.Reflection.MethodInfo) =
                     String(inst.Operand :?> string) |> Constant |> Expression, stack
                 | op when (op = OpCodes.Stloc || op = OpCodes.Stloc_S) -> 
                     let local = 
-                        if inst.Operand :? System.Reflection.LocalVariableInfo then Builder(inst.Operand :?> System.Reflection.LocalVariableInfo)
-                        else Local.Ordinal(inst.Operand |> unbox |> int16 |> int)
+                        if inst.Operand :? System.Reflection.LocalVariableInfo then (inst.Operand :?> System.Reflection.LocalVariableInfo).LocalIndex
+                        else inst.Operand |> unbox |> int16 |> int
                     
                     let (o,_),stack = stack.Pop()
                     StoreLocal(local,o.GetExpression()) |> Statement, stack
 
                 | op when op = OpCodes.Stloc_0 -> 
                     let (o,_),stack = stack.Pop()
-                    StoreLocal(0 |> Ordinal, o.GetExpression()) |> Statement, stack
+                    StoreLocal(0, o.GetExpression()) |> Statement, stack
                 | op when op = OpCodes.Stloc_1 -> 
                     let (o,_),stack = stack.Pop()
-                    StoreLocal(1 |> Ordinal, o.GetExpression()) |> Statement, stack
+                    StoreLocal(1, o.GetExpression()) |> Statement, stack
                 | op when op = OpCodes.Stloc_2 -> 
                     let (o,_),stack = stack.Pop()
-                    StoreLocal(2 |> Ordinal, o.GetExpression()) |> Statement, stack
+                    StoreLocal(2, o.GetExpression()) |> Statement, stack
                 | op when op = OpCodes.Stloc_3 -> 
                     let (o,_),stack = stack.Pop()
-                    StoreLocal(3 |> Ordinal, o.GetExpression()) |> Statement, stack
+                    StoreLocal(3, o.GetExpression()) |> Statement, stack
                 //| op when op = OpCodes.Stfld -> StoreField |> Statement
                 | op when op = OpCodes.Pop -> 
-                    let (o,_),stack = stack.Pop()
-                    Pop(o) |> Statement, stack
+                    match stack.Pop() with
+                    ((Expression(expr),_),stack) -> 
+                        StackStatement.Pop(expr) |> Statement, stack
+                    | e -> failwith $"Expected an expression but got %A{e}"
                 | op when op = OpCodes.Ret -> 
                     let (o,_),stack = stack.Pop()
-                    Return(o.GetExpression()) |> Expression, stack
-                | op when op = OpCodes.Ldfld -> LoadField(inst.Operand :?> FieldInfo) |> Expression, stack
-                | op when op = OpCodes.Ldloc ->
-                    let local  = 
-                        if inst.Operand :? LocalBuilder then Builder(inst.Operand :?> LocalBuilder)
-                        else Local.Ordinal(inst.Operand |> unbox |> int16 |> int)
-                    local |> LoadLocal |> Expression, stack
-                | op when op = OpCodes.Ldloc_0 ->  0 |> Ordinal |> LoadLocal |> Expression, stack
-                | op when op = OpCodes.Ldloc_1 ->  1 |> Ordinal |> LoadLocal |> Expression, stack
-                | op when op = OpCodes.Ldloc_2 ->  2 |> Ordinal |> LoadLocal |> Expression, stack
-                | op when op = OpCodes.Ldloc_3 ->  3 |> Ordinal |> LoadLocal |> Expression, stack
+                    match o with
+                    Statement(ReturnTarget) -> None |> Return |> Expression,stack
+                    | Expression(e) -> e |> Some |> Return |> Expression, stack
+                    | s -> failwith $"Expected a return target or an expression %A{s}"
+                | op when op = OpCodes.Ldfld -> 
+                    let instance,stack = 
+                        match stack.Pop() with
+                        ((Expression(e),_),stack) -> e, stack
+                        | e -> failwith $"Expected an expression but got %A{e}"
+                    LoadField(instance,inst.Operand :?> FieldInfo) |> Expression, stack
+                | op when op = OpCodes.Ldloc ->  
+                    if inst.Operand :? LocalBuilder then (inst.Operand :?> LocalBuilder).LocalIndex
+                    else (inst.Operand |> unbox |> int16 |> int)
+                    |> LoadLocal |> Expression, stack
+                | op when (op |> isLoadLocal) && returnLabel.IsSome && inst.Offset = (returnLabel.Value |> fst) ->
+                    Statement(ReturnTarget),stack
+                | op when op = OpCodes.Ldloc_0 ->  0 |> LoadLocal |> Expression, stack
+                | op when op = OpCodes.Ldloc_1 ->  1 |> LoadLocal |> Expression, stack
+                | op when op = OpCodes.Ldloc_2 ->  2 |> LoadLocal |> Expression, stack
+                | op when op = OpCodes.Ldloc_3 ->  3 |> LoadLocal |> Expression, stack
                 | op when (op = OpCodes.Beq
                            || op = OpCodes.Beq_S)
                     -> 
@@ -313,8 +219,19 @@ type DecompileContext(deepTransform,methodInfo : System.Reflection.MethodInfo) =
                     let offset = (inst.Operand :?> Mono.Reflection.Instruction).Offset
                     (True(o.GetExpression()),offset) |> ConditionalBranch |> Statement, stack
                 | op when (op = OpCodes.Br || op = OpCodes.Br_S) -> 
-                    let offset = (inst.Operand :?> Mono.Reflection.Instruction).Offset
-                    offset |> UnconditionalBranch |> Statement, stack
+                    let target = (inst.Operand :?> Mono.Reflection.Instruction).Offset
+                    match returnLabel with
+                    Some (offset,ld) when offset = target ->
+                        let lastExpr (stack : Stack<_>)= 
+                            match stack.Pop() with
+                            (Statement(StoreLocal(n,exp)),_), stack when ld = n -> exp,stack
+                            | (Expression(e),_), stack -> e,stack
+                            | s,_ -> failwith $"Unexpected early return construct %A{s}"
+                        let expr,stack = lastExpr stack
+                        expr |> Some |> Return |> Expression, stack
+                    | _ ->
+                        target
+                        |> UnconditionalBranch |> Statement, stack
                 | op when op = OpCodes.Ldarg_0 -> This |> Expression, stack
                 | op when op = OpCodes.Ldarg_1 -> LoadArgument 1 |> Expression, stack
                 | op when op = OpCodes.Ldarg_2 -> LoadArgument 2 |> Expression, stack
@@ -331,8 +248,33 @@ type DecompileContext(deepTransform,methodInfo : System.Reflection.MethodInfo) =
                 | op when op = OpCodes.Clt -> 
                     let ((lhs,_),(rhs,_)), stack = stack.PopTuple()
                     Boolean(LessThan(lhs.GetExpression(),rhs.GetExpression())) |> Expression, stack
-                | op when op = OpCodes.Ldloc_S ->
-                    inst.Operand :?> System.Reflection.LocalVariableInfo |> Builder |> LoadLocal |> Expression, stack
+                | op when (op = OpCodes.Ldloc || op = OpCodes.Ldloc_S) -> 
+                    let local = 
+                        if inst.Operand :? System.Reflection.LocalVariableInfo then (inst.Operand :?> System.Reflection.LocalVariableInfo).LocalIndex
+                        else inst.Operand |> unbox |> int16 |> int
+                    local |> LoadLocal |> Expression, stack
+                | op when (op = OpCodes.Leave || op = OpCodes.Leave_S) ->
+                    (inst.Operand :?> Mono.Reflection.Instruction).Offset
+                    |> Leave
+                    |> Statement,stack
+                | op when op = OpCodes.Endfinally ->
+                    EndFinally
+                    |> Statement, stack
+                | op when (inst.Operand :? System.Type )-> 
+                    let typeOperand = inst.Operand :?> System.Type
+                    match op with
+                    | op when op = OpCodes.Newarr ->
+                        let elemCount,stack = stack |> popInt
+                        let elements,stack = stack.Take elemCount
+                        let elements = 
+                            elements
+                            |> List.map(function
+                                (Expression e),offset -> e,offset
+                                | e,offset -> failwith $"Expected an expression for an array element but got %A{e} at %d{offset}"
+                            )
+                        Expression(NewArray(typeOperand, elements)), stack
+
+                    | _ -> failwith $"Typed op not implemented yet %A{op}"
                     ////////////////////////////////////////
                     (*| op when inst.Operand :? System.Type -> 
                         let typeOperand = inst.Operand :?> System.Type
@@ -419,92 +361,16 @@ type DecompileContext(deepTransform,methodInfo : System.Reflection.MethodInfo) =
         methodInfo.GetInstructions()
         |> Seq.filter(fun inst -> inst.OpCode <> OpCodes.Nop)
         |> readInstructions
-    let mutable variables : Map<string,_> = Map.empty
-    let getOrCreateVariable t name =
-        let actualName = methodInfo.Name + "__" + name
-        match variables |> Map.tryFind actualName with
-        None ->
-            let v = Expression.Variable(t,actualName)
-            variables <- variables.Add(actualName,v)
-            v
-        | Some v -> v
-
-    let declaredParameters = 
-        (methodInfo.GetParameters()
-          |> Seq.map(fun p -> p.ParameterType, p.Name)
-          |> Seq.toList
-         )
-
-    let parameters = 
-        if methodInfo.IsStatic then
-            declaredParameters
-        else
-            (methodInfo.DeclaringType,"this")
-            ::declaredParameters
-        |> List.mapi(fun i (argType,name) ->
-           i, argType,name
-        ) 
-    
-    let parameterExpressions = 
-        parameters
-        |> List.map(fun (_,argType,name) ->
-            //this will always be a parameter
-            if deepTransform then
-                name, getOrCreateVariable argType <| "__param__" + name :> Expression
-            else
-                name,Expression.Parameter(argType,name) :> Expression
-        ) |> Map.ofList
-
-    let parameterNames = 
-        parameters
-        |> List.map(fun (i,_,name) ->
-            i,name
-        ) |> Map.ofList
    
     let returnType = methodInfo.ReturnType
     let result = 
         if returnType = typeof<unit> || returnType = typeof<System.Void> then
             Expression.Label(Expression.Label("Result placeholder")) :> Expression
         else
-            getOrCreateVariable returnType "result" :> Expression
+            Expression.Parameter(returnType, "<>__result__") :> Expression
     static let returnLabel = Expression.Label("return target")
-    member __.GetOrCreateVariable = getOrCreateVariable
-    member __.Result = result
     member __.ReturnType = returnType
-    member __.GetParameterExpression ident = parameterExpressions.[parameterNames.[ident]]
-    member __.GetParameterExpressionByName name = parameterExpressions.[name]
-    member __.ParameterExpressions = parameterExpressions |> Map.toSeq
-    member __.Parameters = parameters
-    member __.DeclaredParameters = declaredParameters
     member __.Instructions = instructions
-    member __.Variables = variables |> Map.toSeq
-    member __.GetVariable name = 
-        let qualifiedName = $"%s{methodInfo.Name}__%s{name}"
-        variables |> Map.tryFind qualifiedName
-        |> Option.orElse(
-            try
-                variables.[qualifiedName] |> Some
-            with :? System.Collections.Generic.KeyNotFoundException ->
-                failwith $"Tried finding var '%s{qualifiedName}/%s{name}' in %A{variables}"
-                None
-        ) |> Option.get
-    member __.TryGetVariable name = 
-        let qualifiedName = $"%s{methodInfo.Name}__%s{name}"
-        variables |> Map.tryFind qualifiedName
-        |> Option.orElse(variables |> Map.tryFind name)
-    member __.DeepTransform = deepTransform
     member __.DeclaringType = methodInfo.DeclaringType
-    member __.ParameterOrdinals = 
-        parameterNames
-        |> Map.toSeq
-        |> Seq.map(fun (i,name) -> name, i)
-        |> Map.ofSeq
-    member __.AddVariables vars = 
-        variables <- 
-            vars
-            |> Seq.fold(fun vs (name, expr) ->
-                match vs |> Map.tryFind name with
-                None -> vs.Add(name,expr)
-                | Some _ -> vs
-            ) variables
     static member ReturnLabel = returnLabel
+    member __.MethodName with get() = methodInfo.Name

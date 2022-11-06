@@ -8,14 +8,10 @@
     <DebugType>portable</DebugType>
   </PropertyGroup>
   <ItemGroup>
-    <!-- <Compile Include="Helpers.fs" /> -->
+    <Compile Include="Types.fs" />
     <Compile Include="DecompileContext.fs" />
-    <!--<Compile Include="FSharpDecompiler.fs" />-->
-    <Compile Include="CSharpDecompiler.fs" />
-    <!-- <Compile Include="Template.fs" /> -->
+    <Compile Include="CSharp/Decompiler.fs" />
     <Compile Include="ExpressionTree.fs" />
-    <!-- <Compile Include="DciTest.fs" />
-    <Compile Include="Program.fs" /> -->
   </ItemGroup>
   <Import Project="..\.paket\Paket.Restore.targets" />
 </Project>
